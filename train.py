@@ -1,0 +1,82 @@
+import torch
+import torch.nn.functional as F
+import numpy as np
+import json
+from pathlib import Path
+
+from model import Grokker
+
+
+def make_dataset(p):
+    pairs = [(a, b, (a + b) % p) for a in range(p) for b in range(p)]
+    return pairs
+
+
+def run(
+    p=113,
+    d_model=128,
+    n_heads=4,
+    d_mlp=512,
+    train_frac=0.5,
+    lr=1e-3,
+    weight_decay=1.0,
+    steps=60000,
+    log_every=200,
+    checkpoint_every=5000,
+    save_dir="checkpoints",
+):
+    Path(save_dir).mkdir(exist_ok=True)
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    print(f"device: {device}")
+
+    rng = np.random.default_rng(42)
+    data = make_dataset(p)
+    rng.shuffle(data)
+    n_train = int(len(data) * train_frac)
+    train_data, test_data = data[:n_train], data[n_train:]
+
+    eq = p  # '=' token index
+
+    def to_tensors(subset):
+        x = torch.tensor([[a, b, eq] for a, b, _ in subset], dtype=torch.long, device=device)
+        y = torch.tensor([c for _, _, c in subset], dtype=torch.long, device=device)
+        return x, y
+
+    x_train, y_train = to_tensors(train_data)
+    x_test, y_test = to_tensors(test_data)
+
+    model = Grokker(p, d_model, n_heads, d_mlp).to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    log = []
+
+    for step in range(steps + 1):
+        model.train()
+        loss = F.cross_entropy(model(x_train), y_train)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+
+        if step % log_every == 0:
+            model.eval()
+            with torch.no_grad():
+                train_acc = (model(x_train).argmax(-1) == y_train).float().mean().item()
+                test_acc = (model(x_test).argmax(-1) == y_test).float().mean().item()
+            log.append({"step": step, "loss": round(loss.item(), 4),
+                         "train_acc": round(train_acc, 4), "test_acc": round(test_acc, 4)})
+            if step % 5000 == 0:
+                print(f"step {step:6d}  loss {loss.item():.3f}  train {train_acc:.3f}  test {test_acc:.3f}")
+
+        if step % checkpoint_every == 0:
+            torch.save(model.state_dict(), f"{save_dir}/step_{step:06d}.pt")
+
+    with open(f"{save_dir}/log.json", "w") as f:
+        json.dump(log, f)
+
+    torch.save(model.state_dict(), f"{save_dir}/final.pt")
+    print("done")
+    return model, log
+
+
+if __name__ == "__main__":
+    run()
