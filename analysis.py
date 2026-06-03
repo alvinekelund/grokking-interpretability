@@ -95,6 +95,38 @@ def activation_patch_accuracy(model, x, y, component="mlp"):
     return {"baseline": baseline, "patched": patched, "drop": baseline - patched}
 
 
+def primitive_root(p):
+    """Smallest primitive root mod p (p must be prime)."""
+    for g in range(2, p):
+        order = p - 1
+        n = order
+        is_primitive = True
+        q = 2
+        while q * q <= n:
+            if n % q == 0:
+                if pow(g, order // q, p) == 1:
+                    is_primitive = False
+                    break
+                while n % q == 0:
+                    n //= q
+            q += 1
+        if n > 1 and pow(g, order // n, p) == 1:
+            is_primitive = False
+        if is_primitive:
+            return g
+    raise ValueError(f"no primitive root for p={p}")
+
+
+def dlog_order(p):
+    """
+    Returns list of tokens in discrete log order: [g^0, g^1, ..., g^(p-2)] mod p.
+    Under this reordering, a×b mod p becomes dlog(a)+dlog(b) mod (p-1),
+    so the Fourier analysis over the additive group applies.
+    """
+    g = primitive_root(p)
+    return [pow(g, k, p) for k in range(p - 1)]
+
+
 def plot_spectra_comparison(out="spectra_comparison.png"):
     """Side-by-side embedding spectra for addition and multiplication."""
     add_ckpt = Path("checkpoints_add/final.pt")
@@ -109,24 +141,36 @@ def plot_spectra_comparison(out="spectra_comparison.png"):
     model_mul = load(mul_ckpt)
 
     p = 113
+    g = primitive_root(p)
+
+    # addition: tokens 0..p-1 in natural order
     W_add = model_add.embed.weight[:p].detach().numpy()
-    W_mul = model_mul.embed.weight[:p].detach().numpy()
-
     power_add = fourier_power(W_add, p)
-    power_mul = fourier_power(W_mul, p)
-    freqs = np.arange(len(power_add))
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 5), sharex=True)
-    ax1.bar(freqs, power_add, width=0.8)
+    # multiplication: tokens 1..p-1 in natural order (flat — wrong basis)
+    W_mul_natural = model_mul.embed.weight[1:p].detach().numpy()
+    power_mul_natural = fourier_power(W_mul_natural, p - 1)
+
+    # multiplication: tokens reordered by discrete log (g^0, g^1, ..., g^(p-2))
+    order = dlog_order(p)
+    W_mul_dlog = np.stack([model_mul.embed.weight[t].detach().numpy() for t in order])
+    power_mul_dlog = fourier_power(W_mul_dlog, p - 1)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(11, 7))
+    ax1.bar(np.arange(len(power_add)), power_add, width=0.8)
     ax1.set_ylabel("power fraction")
-    ax1.set_title("addition: (a + b) mod 113")
+    ax1.set_title("addition — natural token order")
 
-    ax2.bar(freqs, power_mul, width=0.8, color="orange")
+    ax2.bar(np.arange(len(power_mul_natural)), power_mul_natural, width=0.8, color="orange")
     ax2.set_ylabel("power fraction")
-    ax2.set_title("multiplication: (a × b) mod 113")
-    ax2.set_xlabel("frequency")
+    ax2.set_title("multiplication — natural token order (flat: wrong basis)")
 
-    fig.suptitle("Embedding Fourier spectra — do both operations learn the same structure?")
+    ax3.bar(np.arange(len(power_mul_dlog)), power_mul_dlog, width=0.8, color="green")
+    ax3.set_ylabel("power fraction")
+    ax3.set_title(f"multiplication — discrete log order (generator g={g})")
+    ax3.set_xlabel("frequency")
+
+    fig.suptitle("Embedding Fourier spectra: same analysis, different bases")
     fig.tight_layout()
     fig.savefig(out, dpi=150)
     plt.close(fig)
