@@ -17,12 +17,12 @@ def run(
     d_model=128,
     n_heads=4,
     d_mlp=512,
-    train_frac=0.5,
+    train_frac=0.3,
     lr=1e-3,
-    weight_decay=1.0,
-    steps=60000,
-    log_every=200,
-    checkpoint_every=5000,
+    weight_decay=0.5,
+    steps=50000,
+    log_every=50,
+    checkpoint_every=1000,
     save_dir="checkpoints",
 ):
     Path(save_dir).mkdir(exist_ok=True)
@@ -55,6 +55,7 @@ def run(
         loss = F.cross_entropy(model(x_train), y_train)
         opt.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
 
         if step % log_every == 0:
@@ -64,7 +65,9 @@ def run(
                 test_acc = (model(x_test).argmax(-1) == y_test).float().mean().item()
             log.append({"step": step, "loss": round(loss.item(), 4),
                          "train_acc": round(train_acc, 4), "test_acc": round(test_acc, 4)})
-            if step % 5000 == 0:
+            with open(f"{save_dir}/log.json", "w") as f:
+                json.dump(log, f)
+            if step % 1000 == 0:
                 print(f"step {step:6d}  loss {loss.item():.3f}  train {train_acc:.3f}  test {test_acc:.3f}")
 
         if step % checkpoint_every == 0:

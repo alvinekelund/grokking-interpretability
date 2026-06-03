@@ -53,8 +53,8 @@ def plot_training_curve(log_path="checkpoints/log.json", out="training_curve.png
     ax.set_title("grokking: delayed generalization on (a+b) mod 113")
     fig.tight_layout()
     fig.savefig(out, dpi=150)
+    plt.close(fig)
     print(f"saved {out}")
-    plt.show()
 
 
 def plot_embedding_spectrum(model, out="embedding_spectrum.png"):
@@ -69,8 +69,8 @@ def plot_embedding_spectrum(model, out="embedding_spectrum.png"):
     ax.set_title("embedding matrix: Fourier spectrum — sparse = model learned the trig circuit")
     fig.tight_layout()
     fig.savefig(out, dpi=150)
+    plt.close(fig)
     print(f"saved {out}")
-    plt.show()
 
 
 def activation_patch_accuracy(model, x, y, component="mlp"):
