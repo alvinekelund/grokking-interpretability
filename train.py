@@ -7,9 +7,14 @@ from pathlib import Path
 from model import Grokker
 
 
-def make_dataset(p):
-    pairs = [(a, b, (a + b) % p) for a in range(p) for b in range(p)]
-    return pairs
+def make_dataset(p, op="add"):
+    if op == "add":
+        return [(a, b, (a + b) % p) for a in range(p) for b in range(p)]
+    elif op == "mul":
+        # exclude pairs with 0 — multiplication by 0 is trivial and doesn't require the circuit
+        return [(a, b, (a * b) % p) for a in range(1, p) for b in range(1, p)]
+    else:
+        raise ValueError(f"unknown op: {op}")
 
 
 def run(
@@ -17,6 +22,7 @@ def run(
     d_model=128,
     n_heads=4,
     d_mlp=512,
+    op="add",
     train_frac=0.3,
     lr=1e-3,
     weight_decay=0.5,
@@ -30,7 +36,7 @@ def run(
     print(f"device: {device}")
 
     rng = np.random.default_rng(42)
-    data = make_dataset(p)
+    data = make_dataset(p, op)
     rng.shuffle(data)
     n_train = int(len(data) * train_frac)
     train_data, test_data = data[:n_train], data[n_train:]
@@ -82,4 +88,8 @@ def run(
 
 
 if __name__ == "__main__":
-    run()
+    import sys
+    op = sys.argv[1] if len(sys.argv) > 1 else "add"
+    save_dir = f"checkpoints_{op}"
+    print(f"op: {op}")
+    run(op=op, save_dir=save_dir)

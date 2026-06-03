@@ -95,29 +95,63 @@ def activation_patch_accuracy(model, x, y, component="mlp"):
     return {"baseline": baseline, "patched": patched, "drop": baseline - patched}
 
 
+def plot_spectra_comparison(out="spectra_comparison.png"):
+    """Side-by-side embedding spectra for addition and multiplication."""
+    add_ckpt = Path("checkpoints_add/final.pt")
+    mul_ckpt = Path("checkpoints_mul/final.pt")
+
+    if not add_ckpt.exists() or not mul_ckpt.exists():
+        missing = [s for s, p in [("add", add_ckpt), ("mul", mul_ckpt)] if not p.exists()]
+        print(f"missing checkpoints for: {missing} — run train.py with those ops first")
+        return
+
+    model_add = load(add_ckpt)
+    model_mul = load(mul_ckpt)
+
+    p = 113
+    W_add = model_add.embed.weight[:p].detach().numpy()
+    W_mul = model_mul.embed.weight[:p].detach().numpy()
+
+    power_add = fourier_power(W_add, p)
+    power_mul = fourier_power(W_mul, p)
+    freqs = np.arange(len(power_add))
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 5), sharex=True)
+    ax1.bar(freqs, power_add, width=0.8)
+    ax1.set_ylabel("power fraction")
+    ax1.set_title("addition: (a + b) mod 113")
+
+    ax2.bar(freqs, power_mul, width=0.8, color="orange")
+    ax2.set_ylabel("power fraction")
+    ax2.set_title("multiplication: (a × b) mod 113")
+    ax2.set_xlabel("frequency")
+
+    fig.suptitle("Embedding Fourier spectra — do both operations learn the same structure?")
+    fig.tight_layout()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"saved {out}")
+
+
 if __name__ == "__main__":
-    plot_training_curve()
+    import sys
+    op = sys.argv[1] if len(sys.argv) > 1 else None
 
-    model = load("checkpoints/final.pt")
+    if op in ("add", None):
+        plot_training_curve(
+            log_path="checkpoints_add/log.json",
+            out="training_curve_add.png",
+        )
+        model_add = load("checkpoints_add/final.pt")
+        plot_embedding_spectrum(model_add, out="embedding_spectrum_add.png")
 
-    plot_embedding_spectrum(model)
+    if op in ("mul", None):
+        plot_training_curve(
+            log_path="checkpoints_mul/log.json",
+            out="training_curve_mul.png",
+        )
+        model_mul = load("checkpoints_mul/final.pt")
+        plot_embedding_spectrum(model_mul, out="embedding_spectrum_mul.png")
 
-    # sanity check: what happens if we zero the MLP
-    import json
-    with open("checkpoints/log.json") as f:
-        log = json.load(f)
-    # build test set
-    from train import make_dataset
-    import numpy as np
-    rng = np.random.default_rng(42)
-    data = make_dataset(113)
-    rng.shuffle(data)
-    n_train = int(len(data) * 0.5)
-    test_data = data[n_train:]
-    eq = 113
-    x = torch.tensor([[a, b, eq] for a, b, _ in test_data], dtype=torch.long)
-    y = torch.tensor([c for _, _, c in test_data], dtype=torch.long)
-
-    result = activation_patch_accuracy(model, x, y, "mlp")
-    print(f"accuracy with full model: {result['baseline']:.3f}")
-    print(f"accuracy without MLP:     {result['patched']:.3f}  (drop: {result['drop']:.3f})")
+    if op is None:
+        plot_spectra_comparison()
